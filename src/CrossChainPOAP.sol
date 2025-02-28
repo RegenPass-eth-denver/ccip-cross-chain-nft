@@ -13,6 +13,7 @@ import {IAny2EVMMessageReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/i
 import {OwnerIsCreator} from "@chainlink/contracts-ccip/src/v0.8/shared/access/OwnerIsCreator.sol";
 import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
 
+
 contract CrossChainPOAP is ERC721, ERC721URIStorage, ERC721Burnable, IAny2EVMMessageReceiver, ReentrancyGuard, OwnerIsCreator {
     using SafeERC20 for IERC20;
 
@@ -36,13 +37,6 @@ contract CrossChainPOAP is ERC721, ERC721URIStorage, ERC721Burnable, IAny2EVMMes
     }
 
     uint256 constant ARBITRUM_SEPOLIA_CHAIN_ID = 421614;
-
-    string[] public defaultURIs = [
-        "https://ipfs.io/ipfs/QmTgqnhFBMkfT9s8PHKcdXBn1f5bG3Q5hmBaR4U6hoTvb1?filename=Chainlink_Elf.png",
-        "https://ipfs.io/ipfs/QmZGQA92ri1jfzSu61JRaNQXYg1bLuM7p8YT83DzFA2KLH?filename=Chainlink_Knight.png",
-        "https://ipfs.io/ipfs/QmW1toapYs7M29rzLXTENn3pbvwe8ioikX1PwzACzjfdHP?filename=Chainlink_Orc.png",
-        "https://ipfs.io/ipfs/QmPMwQtFpEdKrUjpQJfoTeZS1aVSeuJT6Mof7uV29AcUpF?filename=Chainlink_Witch.png"
-    ];
 
     IRouterClient internal immutable i_ccipRouter;
     LinkTokenInterface internal immutable i_linkToken;
@@ -106,13 +100,11 @@ contract CrossChainPOAP is ERC721, ERC721URIStorage, ERC721Burnable, IAny2EVMMes
         i_currentChainSelector = currentChainSelector;
     }
 
-    // Standard mint function on the source chain.
-    function mint() external onlyOnArbitrumSepolia {
+    // Updated mint function: takes a token URI as input.
+    function mint(string memory tokenUri) external onlyOnArbitrumSepolia {
         uint256 tokenId = _nextTokenId++;
-        // Choose a default URI based on the tokenId modulo the available URIs.
-        string memory uri = defaultURIs[tokenId % defaultURIs.length];
         _safeMint(msg.sender, tokenId);
-        _setTokenURI(tokenId, uri);
+        _setTokenURI(tokenId, tokenUri);
     }
 
     function enableChain(uint64 chainSelector, address poapAddress, bytes memory ccipExtraArgs)

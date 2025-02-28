@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import {Test, console} from "forge-std/Test.sol";
 import {CCIPLocalSimulatorFork, Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 
-import {CrossChainPOAP} from "../src/XNFT.sol";
+import {CrossChainPOAP} from "../src/CrossChainPOAP.sol";
 import {EncodeExtraArgs} from "./utils/EncodeExtraArgs.sol";
 
 contract CrossChainPOAPTest is Test {
@@ -66,6 +66,19 @@ contract CrossChainPOAPTest is Test {
             baseSepoliaNetworkDetails.linkAddress,
             baseSepoliaNetworkDetails.chainSelector
         );
+    }
+
+    function testShouldDirectMintOnArbitrum() public {
+        // Direct mint on Arbitrum Sepolia now accepts a token URI as input.
+        vm.selectFork(arbSepoliaFork);
+        vm.startPrank(alice);
+        string memory directTokenURI = "ipfs://directMintPOAP";
+        arbSepoliaPOAP.mint(directTokenURI);
+        uint256 tokenId = 0; // First minted token on Arbitrum.
+        assertEq(arbSepoliaPOAP.balanceOf(alice), 1);
+        assertEq(arbSepoliaPOAP.ownerOf(tokenId), alice);
+        assertEq(arbSepoliaPOAP.tokenURI(tokenId), directTokenURI);
+        vm.stopPrank();
     }
 
     function testShouldCrossChainMintPOAPFromArbitrumToEthereum() public {
