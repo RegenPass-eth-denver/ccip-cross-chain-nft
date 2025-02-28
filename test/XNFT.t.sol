@@ -4,10 +4,10 @@ pragma solidity ^0.8.13;
 import {Test, console} from "forge-std/Test.sol";
 import {CCIPLocalSimulatorFork, Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 
-import {XNFT} from "../src/XNFT.sol";
+import {CrossChainPOAP} from "../src/XNFT.sol";
 import {EncodeExtraArgs} from "./utils/EncodeExtraArgs.sol";
 
-contract XNFTTest is Test {
+contract CrossChainPOAPTest is Test {
     CCIPLocalSimulatorFork public ccipLocalSimulatorFork;
     uint256 ethSepoliaFork;
     uint256 arbSepoliaFork;
@@ -17,8 +17,8 @@ contract XNFTTest is Test {
     address alice;
     address bob;
 
-    XNFT public ethSepoliaXNFT;
-    XNFT public arbSepoliaXNFT;
+    CrossChainPOAP public ethSepoliaPOAP;
+    CrossChainPOAP public arbSepoliaPOAP;
 
     EncodeExtraArgs public encodeExtraArgs;
 
@@ -34,88 +34,58 @@ contract XNFTTest is Test {
         ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
         vm.makePersistent(address(ccipLocalSimulatorFork));
 
-        // Step 1) Deploy XNFT.sol to Ethereum Sepolia
-        assertEq(vm.activeFork(), ethSepoliaFork);
-
-        ethSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid); // we are currently on Ethereum Sepolia Fork
-        assertEq(
-            ethSepoliaNetworkDetails.chainSelector,
-            16015286601757825753,
-            "Sanity check: Ethereum Sepolia chain selector should be 16015286601757825753"
-        );
-
-        ethSepoliaXNFT = new XNFT(
+        // Deploy CrossChainPOAP on Ethereum Sepolia
+        vm.selectFork(ethSepoliaFork);
+        ethSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+        ethSepoliaPOAP = new CrossChainPOAP(
             ethSepoliaNetworkDetails.routerAddress,
             ethSepoliaNetworkDetails.linkAddress,
             ethSepoliaNetworkDetails.chainSelector
         );
 
-        // Step 2) Deploy XNFT.sol to Arbitrum Sepolia
+        // Deploy CrossChainPOAP on Arbitrum Sepolia
         vm.selectFork(arbSepoliaFork);
-        assertEq(vm.activeFork(), arbSepoliaFork);
-
-        arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid); // we are currently on Arbitrum Sepolia Fork
-        assertEq(
-            arbSepoliaNetworkDetails.chainSelector,
-            3478487238524512106,
-            "Sanity check: Arbitrum Sepolia chain selector should be 421614"
-        );
-
-        arbSepoliaXNFT = new XNFT(
+        arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+        arbSepoliaPOAP = new CrossChainPOAP(
             arbSepoliaNetworkDetails.routerAddress,
             arbSepoliaNetworkDetails.linkAddress,
             arbSepoliaNetworkDetails.chainSelector
         );
     }
 
-    function testShouldMintNftOnArbitrumSepoliaAndTransferItToEthereumSepolia() public {
-        // Step 3) On Ethereum Sepolia, call enableChain function
+    function testShouldCrossChainMintPOAPFromArbitrumToEthereum() public {
+        // Step 1) On Ethereum Sepolia, enable the Arbitrum chain for cross-chain minting.
         vm.selectFork(ethSepoliaFork);
-        assertEq(vm.activeFork(), ethSepoliaFork);
-
         encodeExtraArgs = new EncodeExtraArgs();
-
         uint256 gasLimit = 200_000;
         bytes memory extraArgs = encodeExtraArgs.encode(gasLimit);
-        assertEq(extraArgs, hex"97a657c90000000000000000000000000000000000000000000000000000000000030d40"); // value taken from https://cll-devrel.gitbook.io/ccip-masterclass-3/ccip-masterclass/exercise-xnft#step-3-on-ethereum-sepolia-call-enablechain-function
+        ethSepoliaPOAP.enableChain(arbSepoliaNetworkDetails.chainSelector, address(arbSepoliaPOAP), extraArgs);
 
-        ethSepoliaXNFT.enableChain(arbSepoliaNetworkDetails.chainSelector, address(arbSepoliaXNFT), extraArgs);
-
-        // Step 4) On Arbitrum Sepolia, call enableChain function
+        // Step 2) On Arbitrum Sepolia, enable the Ethereum chain for cross-chain minting.
         vm.selectFork(arbSepoliaFork);
-        assertEq(vm.activeFork(), arbSepoliaFork);
+        arbSepoliaPOAP.enableChain(ethSepoliaNetworkDetails.chainSelector, address(ethSepoliaPOAP), extraArgs);
 
-        arbSepoliaXNFT.enableChain(ethSepoliaNetworkDetails.chainSelector, address(ethSepoliaXNFT), extraArgs);
+        // Step 3) Fund the Arbitrum POAP contract with LINK (3 LINK).
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(arbSepoliaPOAP), 3 ether);
 
-        // Step 5) On Arbitrum Sepolia, fund XNFT.sol with 3 LINK
-        assertEq(vm.activeFork(), arbSepoliaFork);
-
-        ccipLocalSimulatorFork.requestLinkFromFaucet(address(arbSepoliaXNFT), 3 ether);
-
-        // Step 6) On Arbitrum Sepolia, mint new xNFT
-        assertEq(vm.activeFork(), arbSepoliaFork);
-
+        // Step 4) On Arbitrum, have Alice initiate a cross-chain mint for Bob.
         vm.startPrank(alice);
-
-        arbSepoliaXNFT.mint();
-        uint256 tokenId = 0;
-        assertEq(arbSepoliaXNFT.balanceOf(alice), 1);
-        assertEq(arbSepoliaXNFT.ownerOf(tokenId), alice);
-
-        // Step 7) On Arbitrum Sepolia, crossTransferFrom xNFT
-        arbSepoliaXNFT.crossChainTransferFrom(
-            address(alice), address(bob), tokenId, ethSepoliaNetworkDetails.chainSelector, XNFT.PayFeesIn.LINK
+        string memory testTokenURI = "ipfs://testPOAP";
+        bytes32 messageId = arbSepoliaPOAP.crossChainMint(
+            bob,
+            testTokenURI,
+            ethSepoliaNetworkDetails.chainSelector,
+            CrossChainPOAP.PayFeesIn.LINK
         );
-
         vm.stopPrank();
 
-        assertEq(arbSepoliaXNFT.balanceOf(alice), 0);
+        // Step 5) Simulate CCIP message delivery to Ethereum Sepolia.
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(ethSepoliaFork);
 
-        // On Ethereum Sepolia, check if xNFT was succesfully transferred
-        ccipLocalSimulatorFork.switchChainAndRouteMessage(ethSepoliaFork); // THIS LINE REPLACES CHAINLINK CCIP DONs, DO NOT FORGET IT
-        assertEq(vm.activeFork(), ethSepoliaFork);
-
-        assertEq(ethSepoliaXNFT.balanceOf(bob), 1);
-        assertEq(ethSepoliaXNFT.ownerOf(tokenId), bob);
+        // Step 6) Verify that on Ethereum Sepolia, Bob received the newly minted POAP.
+        assertEq(ethSepoliaPOAP.balanceOf(bob), 1);
+        uint256 tokenId = 0; // First minted token on Ethereum.
+        assertEq(ethSepoliaPOAP.ownerOf(tokenId), bob);
+        assertEq(ethSepoliaPOAP.tokenURI(tokenId), testTokenURI);
     }
 }
