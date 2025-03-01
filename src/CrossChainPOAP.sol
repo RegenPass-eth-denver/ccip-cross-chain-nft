@@ -101,7 +101,7 @@ contract CrossChainPOAP is ERC721, ERC721URIStorage, ERC721Burnable, IAny2EVMMes
     }
 
     // Updated mint function: takes a token URI as input.
-    function mint(string memory tokenUri) external onlyOnArbitrumSepolia {
+    function mint(string memory tokenUri) external {
         uint256 tokenId = _nextTokenId++;
         _safeMint(msg.sender, tokenId);
         _setTokenURI(tokenId, tokenUri);

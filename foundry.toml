@@ -3,7 +3,7 @@ src = "src"
 out = "out"
 test = "test"
 libs = ["lib"]
-solc = '0.8.24'
+solc = '0.8.20'
 
 remappings = [
     '@chainlink/contracts-ccip=lib/ccip/contracts',

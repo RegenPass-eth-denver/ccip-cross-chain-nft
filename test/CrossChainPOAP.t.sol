@@ -19,6 +19,7 @@ contract CrossChainPOAPTest is Test {
     address alice;
     address bob;
 
+    // Instances on each chain
     CrossChainPOAP public ethSepoliaPOAP;
     CrossChainPOAP public arbSepoliaPOAP;
     CrossChainPOAP public baseSepoliaPOAP;
@@ -40,27 +41,39 @@ contract CrossChainPOAPTest is Test {
         ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
         vm.makePersistent(address(ccipLocalSimulatorFork));
 
-        // Deploy CrossChainPOAP on Ethereum Sepolia
+        // Deploy POAP contracts on all three chains.
+        // In the new flow, the contract deployed on Base Sepolia is the source for cross-chain calls.
+        
+        // Deploy on Ethereum Sepolia (destination)
         vm.selectFork(ethSepoliaFork);
         ethSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+        console.log("ethSepoliaNetworkDetails.routerAddress: %s", ethSepoliaNetworkDetails.routerAddress);
+        console.log("ethSepoliaNetworkDetails.linkAddress: %s", ethSepoliaNetworkDetails.linkAddress);
+        console.log("ethSepoliaNetworkDetails.chainSelector: %s", ethSepoliaNetworkDetails.chainSelector);
         ethSepoliaPOAP = new CrossChainPOAP(
             ethSepoliaNetworkDetails.routerAddress,
             ethSepoliaNetworkDetails.linkAddress,
             ethSepoliaNetworkDetails.chainSelector
         );
 
-        // Deploy CrossChainPOAP on Arbitrum Sepolia
+        // Deploy on Arbitrum Sepolia (destination)
         vm.selectFork(arbSepoliaFork);
         arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+        console.log("arbSepoliaNetworkDetails.routerAddress: %s", arbSepoliaNetworkDetails.routerAddress);
+        console.log("arbSepoliaNetworkDetails.linkAddress: %s", arbSepoliaNetworkDetails.linkAddress);
+        console.log("arbSepoliaNetworkDetails.chainSelector: %s", arbSepoliaNetworkDetails.chainSelector);
         arbSepoliaPOAP = new CrossChainPOAP(
             arbSepoliaNetworkDetails.routerAddress,
             arbSepoliaNetworkDetails.linkAddress,
             arbSepoliaNetworkDetails.chainSelector
         );
 
-        // Deploy CrossChainPOAP on Base Sepolia
+        // Deploy on Base Sepolia (source)
         vm.selectFork(baseSepoliaFork);
         baseSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+        console.log("baseSepoliaNetworkDetails.routerAddress: %s", baseSepoliaNetworkDetails.routerAddress);
+        console.log("baseSepoliaNetworkDetails.linkAddress: %s", baseSepoliaNetworkDetails.linkAddress);
+        console.log("baseSepoliaNetworkDetails.chainSelector: %s", baseSepoliaNetworkDetails.chainSelector);
         baseSepoliaPOAP = new CrossChainPOAP(
             baseSepoliaNetworkDetails.routerAddress,
             baseSepoliaNetworkDetails.linkAddress,
@@ -68,38 +81,79 @@ contract CrossChainPOAPTest is Test {
         );
     }
 
-    function testShouldDirectMintOnArbitrum() public {
-        // Direct mint on Arbitrum Sepolia now accepts a token URI as input.
-        vm.selectFork(arbSepoliaFork);
+    /// @notice Direct mint on Base Sepolia (source chain)
+    function testDirectMintOnBase() public {
+        vm.selectFork(baseSepoliaFork);
         vm.startPrank(alice);
-        string memory directTokenURI = "ipfs://directMintPOAP";
-        arbSepoliaPOAP.mint(directTokenURI);
-        uint256 tokenId = 0; // First minted token on Arbitrum.
-        assertEq(arbSepoliaPOAP.balanceOf(alice), 1);
-        assertEq(arbSepoliaPOAP.ownerOf(tokenId), alice);
-        assertEq(arbSepoliaPOAP.tokenURI(tokenId), directTokenURI);
+        string memory directTokenURI = "ipfs://directMintPOAPBase";
+        baseSepoliaPOAP.mint(directTokenURI);
+        uint256 tokenId = 0; // First minted token.
+        assertEq(baseSepoliaPOAP.balanceOf(alice), 1);
+        assertEq(baseSepoliaPOAP.ownerOf(tokenId), alice);
+        assertEq(baseSepoliaPOAP.tokenURI(tokenId), directTokenURI);
         vm.stopPrank();
     }
 
-    function testShouldCrossChainMintPOAPFromArbitrumToEthereum() public {
-        // Step 1) On Ethereum Sepolia, enable the Arbitrum chain for cross-chain minting.
-        vm.selectFork(ethSepoliaFork);
+    /// @notice Cross-chain mint from Base Sepolia to Arbitrum Sepolia.
+    function testCrossChainMintFromBaseToArbitrum() public {
+        // Step 1) On Base Sepolia, enable Arbitrum for cross-chain minting.
+        vm.selectFork(baseSepoliaFork);
         encodeExtraArgs = new EncodeExtraArgs();
         uint256 gasLimit = 200_000;
         bytes memory extraArgs = encodeExtraArgs.encode(gasLimit);
-        ethSepoliaPOAP.enableChain(arbSepoliaNetworkDetails.chainSelector, address(arbSepoliaPOAP), extraArgs);
+        baseSepoliaPOAP.enableChain(arbSepoliaNetworkDetails.chainSelector, address(arbSepoliaPOAP), extraArgs);
 
-        // Step 2) On Arbitrum Sepolia, enable the Ethereum chain for cross-chain minting.
+        // Step 2) On Arbitrum, enable Base for cross-chain minting.
         vm.selectFork(arbSepoliaFork);
-        arbSepoliaPOAP.enableChain(ethSepoliaNetworkDetails.chainSelector, address(ethSepoliaPOAP), extraArgs);
+        arbSepoliaPOAP.enableChain(baseSepoliaNetworkDetails.chainSelector, address(baseSepoliaPOAP), extraArgs);
 
-        // Step 3) Fund the Arbitrum POAP contract with LINK (3 LINK).
-        ccipLocalSimulatorFork.requestLinkFromFaucet(address(arbSepoliaPOAP), 3 ether);
+        // Step 3) Fund the Base contract with LINK (using 3 LINK here).
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(baseSepoliaPOAP), 3 ether);
 
-        // Step 4) On Arbitrum, have Alice initiate a cross-chain mint for Bob.
+        // Step 4) On Base, have Alice initiate a cross-chain mint for Bob targeting Arbitrum.
+        vm.selectFork(baseSepoliaFork);
         vm.startPrank(alice);
-        string memory testTokenURI = "ipfs://testPOAP";
-        bytes32 messageId = arbSepoliaPOAP.crossChainMint(
+        string memory testTokenURI = "ipfs://testPOAPArb";
+        baseSepoliaPOAP.crossChainMint(
+            bob,
+            testTokenURI,
+            arbSepoliaNetworkDetails.chainSelector,
+            CrossChainPOAP.PayFeesIn.LINK
+        );
+        vm.stopPrank();
+
+        // Step 5) Simulate CCIP message delivery to Arbitrum.
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        // Step 6) Verify that on Arbitrum, Bob received the newly minted POAP.
+        assertEq(arbSepoliaPOAP.balanceOf(bob), 1);
+        uint256 tokenId = 0; // First minted token on Arbitrum.
+        assertEq(arbSepoliaPOAP.ownerOf(tokenId), bob);
+        assertEq(arbSepoliaPOAP.tokenURI(tokenId), testTokenURI);
+    }
+
+    /// @notice Cross-chain mint from Base Sepolia to Ethereum Sepolia.
+    function testCrossChainMintFromBaseToEthereum() public {
+        // Step 1) On Base Sepolia, enable Ethereum for cross-chain minting.
+        vm.selectFork(baseSepoliaFork);
+        encodeExtraArgs = new EncodeExtraArgs();
+        uint256 gasLimit = 200_000;
+        bytes memory extraArgs = encodeExtraArgs.encode(gasLimit);
+        // console.log("extraArgs: %s", extraArgs);
+        baseSepoliaPOAP.enableChain(ethSepoliaNetworkDetails.chainSelector, address(ethSepoliaPOAP), extraArgs);
+
+        // Step 2) On Ethereum, enable Base for cross-chain minting.
+        vm.selectFork(ethSepoliaFork);
+        ethSepoliaPOAP.enableChain(baseSepoliaNetworkDetails.chainSelector, address(baseSepoliaPOAP), extraArgs);
+
+        // Step 3) Fund the Base contract with LINK.
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(baseSepoliaPOAP), 3 ether);
+
+        // Step 4) On Base, have Alice initiate a cross-chain mint for Bob targeting Ethereum.
+        vm.selectFork(baseSepoliaFork);
+        vm.startPrank(alice);
+        string memory testTokenURI = "ipfs://testPOAPEth";
+        baseSepoliaPOAP.crossChainMint(
             bob,
             testTokenURI,
             ethSepoliaNetworkDetails.chainSelector,
@@ -107,49 +161,13 @@ contract CrossChainPOAPTest is Test {
         );
         vm.stopPrank();
 
-        // Step 5) Simulate CCIP message delivery to Ethereum Sepolia.
+        // Step 5) Simulate CCIP message delivery to Ethereum.
         ccipLocalSimulatorFork.switchChainAndRouteMessage(ethSepoliaFork);
 
-        // Step 6) Verify that on Ethereum Sepolia, Bob received the newly minted POAP.
+        // Step 6) Verify that on Ethereum, Bob received the newly minted POAP.
         assertEq(ethSepoliaPOAP.balanceOf(bob), 1);
         uint256 tokenId = 0; // First minted token on Ethereum.
         assertEq(ethSepoliaPOAP.ownerOf(tokenId), bob);
         assertEq(ethSepoliaPOAP.tokenURI(tokenId), testTokenURI);
-    }
-
-    function testShouldCrossChainMintPOAPFromArbitrumToBase() public {
-        // Step 1) On Base Sepolia, enable the Arbitrum chain for cross-chain minting.
-        vm.selectFork(baseSepoliaFork);
-        encodeExtraArgs = new EncodeExtraArgs();
-        uint256 gasLimit = 200_000;
-        bytes memory extraArgs = encodeExtraArgs.encode(gasLimit);
-        baseSepoliaPOAP.enableChain(arbSepoliaNetworkDetails.chainSelector, address(arbSepoliaPOAP), extraArgs);
-
-        // Step 2) On Arbitrum Sepolia, enable the Base chain for cross-chain minting.
-        vm.selectFork(arbSepoliaFork);
-        arbSepoliaPOAP.enableChain(baseSepoliaNetworkDetails.chainSelector, address(baseSepoliaPOAP), extraArgs);
-
-        // Step 3) Fund the Arbitrum POAP contract with LINK (3 LINK).
-        ccipLocalSimulatorFork.requestLinkFromFaucet(address(arbSepoliaPOAP), 3 ether);
-
-        // Step 4) On Arbitrum, have Alice initiate a cross-chain mint for Bob targeting Base Sepolia.
-        vm.startPrank(alice);
-        string memory testTokenURI = "ipfs://testPOAPBase";
-        bytes32 messageId = arbSepoliaPOAP.crossChainMint(
-            bob,
-            testTokenURI,
-            baseSepoliaNetworkDetails.chainSelector,
-            CrossChainPOAP.PayFeesIn.LINK
-        );
-        vm.stopPrank();
-
-        // Step 5) Simulate CCIP message delivery to Base Sepolia.
-        ccipLocalSimulatorFork.switchChainAndRouteMessage(baseSepoliaFork);
-
-        // Step 6) Verify that on Base Sepolia, Bob received the newly minted POAP.
-        assertEq(baseSepoliaPOAP.balanceOf(bob), 1);
-        uint256 tokenId = 0; // First minted token on Base Sepolia.
-        assertEq(baseSepoliaPOAP.ownerOf(tokenId), bob);
-        assertEq(baseSepoliaPOAP.tokenURI(tokenId), testTokenURI);
     }
 }
